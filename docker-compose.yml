@@ -1,0 +1,69 @@
+version: "3.2"
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2017-latest
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=password
+      - MSSQL_PID=Developer
+    volumes:
+      - ./mssql:/var/opt/mssql
+    networks:
+      - keycloak-network
+
+
+  mssqlscripts:
+    image: mcr.microsoft.com/mssql-tools
+    depends_on:
+      - mssql
+    command: /bin/bash -c 'if /opt/mssql-tools/bin/sqlcmd -S mssql -U sa -P "password" -Q "SELECT COUNT(*) FROM sys.databases WHERE name = N''Keycloak''" | grep -q "0"; then /opt/mssql-tools/bin/sqlcmd -S mssql -U sa -P "password" -Q "create database Keycloak"; fi; /opt/mssql-tools/bin/sqlcmd -S mssql -U sa -P "password" -Q "use master; EXEC sp_sqljdbc_xa_install;"'
+    networks:
+      - keycloak-network
+
+  keycloak:
+    image: keycloak-test:v1
+    container_name: keycloak-test-conteyner
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["start  --spi-phone-default-service=dummy   --hostname-url=https://mertc.domain.io:8443  --hostname-admin=mertc.domain.io --http-enabled=false  --https-port=8443 --https-certificate-file=/usr/certs/file.crt --https-certificate-key-file=/usr/certs/file.key"]
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./usr/certs:/usr/certs
+#      - ./org.keycloak.keycloak-themes-22.0.1.jar:/opt/keycloak/lib/lib/main/org.keycloak.keycloak-themes-22.0.1.jar
+      - ./custom_theme/themes:/opt/keycloak/themes
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=password
+    depends_on:
+      - mssql
+    networks:
+      - keycloak-network
+
+  healthcheck:
+    image: curlimages/curl:latest
+    command:
+      - "sh"
+      - "-c"
+      - >
+          while true; do
+            sleep 3600;
+          done
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "https://mertc.domain.io:8443/health" ]
+      interval: 10s
+      timeout: 60s
+      retries: 5
+    depends_on:
+      - keycloak
+    links:
+      - keycloak:keycloak
+
+
+networks:
+  keycloak-network:
+    driver: bridge
